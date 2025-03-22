@@ -1,0 +1,53 @@
+# Virtual Environment
+venv/
+.venv/
+.venv/
+env/
+.env/
+*/env/
+*/.env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dll
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# IDE Specific Files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs and Temp Files
+*.log
+*.bak
+*.tmp
+*.cache
+
+# Environment Variables/Secrets
+.env
+.env.*
+*.secrets.json
+*.credentials.json
+
+# Database Files (if applicable)
+*.sqlite
+*.db
+
+# Distribution / Build Files
+dist/
+build/
+*.egg
+
+# Coverage Files
+.coverage
+htmlcov/
+coverage.xml
+
+# Fast API specific files that are generated.
+.python-version
