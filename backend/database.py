@@ -22,7 +22,7 @@ def get_unique_countries_for_co2():
     unique_countries = df_co2["Country"].dropna().unique().tolist()
     return {"countries": unique_countries}
 
-def filter_temperature_data(country: str, city: str, start_year: int, end_year: int):
+def filter_temperature_data(country: str, start_year: int, end_year: int, city: str=""):
     """Filter temperature data based on country, optional city, and year range."""
     filtered_df = df_temp[
         (df_temp["Country"] == country) &

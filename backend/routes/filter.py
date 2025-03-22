@@ -15,7 +15,7 @@ def filter_data(
         if not city:
             city = ""
             # return {"error": "City is required for temperature filtering"}
-        return filter_temperature_data(country, city, start_year, end_year)
+        return filter_temperature_data(country, start_year, end_year, city)
     
     elif dataset == "co2":
         return filter_co2_data(country, start_year, end_year)
