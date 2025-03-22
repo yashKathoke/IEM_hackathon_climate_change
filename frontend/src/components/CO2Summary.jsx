@@ -1,7 +1,5 @@
-
-import { useState, useRef, useEffect } from "react"
-import { Line } from "react-chartjs-2"
-import CO2Filters from "./CO2Filters"
+import { useState, useRef } from "react";
+import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -11,132 +9,244 @@ import {
   Title,
   Tooltip,
   Legend,
-} from "chart.js"
+} from "chart.js";
+import CO2Filters from "./CO2Filters";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend)
+// Register Chart.js components
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
-const CO2Combined = () => {
-  const [chartData, setChartData] = useState(null)
-  const [summary, setSummary] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [chartLoading, setChartLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [activeFilters, setActiveFilters] = useState(null)
-  const chartRef = useRef(null)
+const CO2Chart = () => {
+  const [chartData, setChartData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [activeFilters, setActiveFilters] = useState(null);
+  const [summary, setSummary] = useState("");
+  const chartRef = useRef(null);
 
-  useEffect(() => {
-    return () => {
-      if (chartRef.current) {
-        chartRef.current.destroy()
+  const processData = (data, filters) => {
+    try {
+      // 1. Group data by country → { countryName: { [year]: emissions } }
+      const groupedByCountry = {};
+      data.forEach((record) => {
+        const { Country, year, co2_emissions } = record;
+        if (!groupedByCountry[Country]) {
+          groupedByCountry[Country] = {};
+        }
+        groupedByCountry[Country][year] = co2_emissions;
+      });
+  
+      // 2. Filter to only include countries from filters with sufficient data
+      const filteredCountries = {};
+      const start = Number.parseInt(filters.startYear, 10);
+      const end = Number.parseInt(filters.endYear, 10);
+      filters.countries.forEach((c) => {
+        if (groupedByCountry[c]) {
+          const countryData = groupedByCountry[c];
+          // Count how many years have actual data
+          const dataPoints = Object.keys(countryData).filter(
+            (year) => year >= start && year <= end && countryData[year] !== undefined
+          ).length;
+          // Only include if there's at least some data (e.g., 2+ points)
+          if (dataPoints > 1) {
+            filteredCountries[c] = countryData;
+          } else {
+            console.warn(`Skipping ${c}: insufficient data points (${dataPoints})`);
+          }
+        } else {
+          console.warn(`No data found for ${c} in the selected range`);
+        }
+      });
+  
+      if (Object.keys(filteredCountries).length === 0) {
+        console.error("No valid data to display after filtering");
+        setError("No sufficient data available for the selected countries and period.");
+        return null;
       }
+  
+      // 3. Create an array of years for the x-axis
+      const years = [];
+      for (let y = start; y <= end; y++) {
+        years.push(y);
+      }
+  
+      // 4. Define a color palette for multiple lines
+      const colors = [
+        "rgb(239, 68, 68)",
+        "rgb(59, 130, 246)",
+        "rgb(16, 185, 129)",
+        "rgb(245, 158, 11)",
+        "rgb(139, 92, 246)",
+        "rgb(236, 72, 153)",
+        "rgb(14, 165, 233)",
+        "rgb(168, 85, 247)",
+      ];
+  
+      // 5. Build datasets (one per country)
+      const datasets = Object.keys(filteredCountries).map((country, index) => {
+        const color = colors[index % colors.length];
+        const countryData = filteredCountries[country];
+        // Only include years with actual data, null for missing years
+        const dataPoints = years.map((year) => 
+          countryData[year] !== undefined ? countryData[year] : null
+        );
+  
+        console.log(`${country} data:`, dataPoints); // Debug log
+  
+        return {
+          label: country,
+          data: dataPoints,
+          borderColor: color,
+          backgroundColor: color.replace("rgb", "rgba").replace(")", ", 0.1)"),
+          borderWidth: 2,
+          tension: 0.3,
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          fill: false, // Disable fill to avoid misleading visuals
+          spanGaps: true, // Connect lines across gaps (null values)
+        };
+      });
+  
+      return { labels: years, datasets };
+    } catch (err) {
+      console.error("Error processing data:", err);
+      setError("Failed to process chart data.");
+      return null;
     }
-  }, [])
+  };
 
-  const fetchData = (filters) => {
-    setChartLoading(true)
-    setChartData(null)
+  const generateSummary = (data, filters) => {
+    try {
+      const countryStats = {};
 
-    fetch(
-      `http://127.0.0.1:8000/filter?dataset=co2&country=${filters.country}&start_year=${filters.startYear}&end_year=${filters.endYear}`,
-    )
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error("Failed to fetch chart data")
+      filters.countries.forEach((country) => {
+        const countryData = data.filter(
+          (d) => d.Country === country && d.year >= filters.startYear && d.year <= filters.endYear,
+        );
+        if (countryData.length > 0) {
+          const emissionsArr = countryData.map((d) => d.co2_emissions);
+          const minEmission = Math.min(...emissionsArr);
+          const maxEmission = Math.max(...emissionsArr);
+
+          const minYear = countryData.find((d) => d.co2_emissions === minEmission)?.year;
+          const maxYear = countryData.find((d) => d.co2_emissions === maxEmission)?.year;
+
+          const earliestYear = Math.min(...countryData.map((d) => d.year));
+          const latestYear = Math.max(...countryData.map((d) => d.year));
+          const earliestVal = countryData.find((d) => d.year === earliestYear)?.co2_emissions || 0;
+          const latestVal = countryData.find((d) => d.year === latestYear)?.co2_emissions || 0;
+          const growthPercent = earliestVal > 0
+            ? (((latestVal - earliestVal) / earliestVal) * 100).toFixed(1)
+            : 0;
+
+          countryStats[country] = {
+            minEmission,
+            maxEmission,
+            minYear,
+            maxYear,
+            growthPercent,
+            earliestYear,
+            latestYear,
+          };
         }
-        return res.json()
-      })
-      .then((data) => {
-        setChartData({
-          labels: data.map((d) => d.year),
-          datasets: [
-            {
-              label: "CO₂ Emissions (Metric Tons)",
-              data: data.map((d) => d.co2_emissions),
-              borderColor: "rgb(59, 130, 246)",
-              backgroundColor: "rgba(59, 130, 246, 0.2)",
-              borderWidth: 2,
-              tension: 0.3,
-              pointBackgroundColor: "rgb(59, 130, 246)",
-              pointBorderColor: "#fff",
-              pointRadius: 4,
-              pointHoverRadius: 6,
-              fill: true,
-            },
-          ],
-        })
-        setChartLoading(false)
-        setError(null)
-      })
-      .catch((err) => {
-        setError(err.message)
-        setChartLoading(false)
-      })
-  }
+      });
 
-  const fetchSummary = (filters) => {
-    setLoading(true)
-    setSummary("")
-
-    const queryParams = new URLSearchParams({
-      country: filters.country,
-      start_year: filters.startYear,
-      end_year: filters.endYear,
-    })
-
-    fetch(`http://127.0.0.1:8000/co2-summary?${queryParams.toString()}`)
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error("Failed to fetch summary")
+      let summaryText = `Analysis of CO₂ emissions from ${filters.startYear} to ${filters.endYear}:\n\n`;
+      Object.keys(countryStats).forEach((country) => {
+        const s = countryStats[country];
+        summaryText += `${country}: `;
+        if (s.growthPercent > 0) {
+          summaryText += `Emissions grew by ${s.growthPercent}% between ${s.earliestYear} and ${s.latestYear}. `;
+        } else if (s.growthPercent < 0) {
+          summaryText += `Emissions decreased by ${Math.abs(s.growthPercent)}% between ${s.earliestYear} and ${s.latestYear}. `;
+        } else {
+          summaryText += `Emissions stayed roughly the same between ${s.earliestYear} and ${s.latestYear}. `;
         }
-        return res.json()
-      })
-      .then((data) => {
-        setSummary(data.error ? data.error : data.summary)
-        setLoading(false)
-      })
-      .catch((err) => {
-        setSummary("An error occurred while fetching the summary.")
-        setLoading(false)
-      })
-  }
+        summaryText += `Peak emissions of ${s.maxEmission.toLocaleString()} metric tons occurred in ${s.maxYear}.\n\n`;
+      });
+
+      setSummary(summaryText);
+    } catch (err) {
+      console.error("Error generating summary:", err);
+      setSummary("Unable to generate summary from the available data.");
+    }
+  };
+
+  const fetchData = async (filters) => {
+    setLoading(true);
+    setError(null);
+    setSummary("");
+
+    try {
+      const countriesParam = filters.countries.join(",");
+      const dataQuery = new URLSearchParams({
+        dataset: "co2",
+        country: countriesParam,
+        start_year: filters.startYear,
+        end_year: filters.endYear,
+      });
+
+      const dataRes = await fetch(`http://127.0.0.1:8000/filter?${dataQuery.toString()}`);
+      if (!dataRes.ok) throw new Error(`Failed to fetch CO2 data: ${dataRes.status}`);
+      const dataJson = await dataRes.json();
+
+      const processed = processData(dataJson, filters);
+      setChartData(processed);
+
+      const summaryQuery = new URLSearchParams({
+        country: countriesParam,
+        start_year: filters.startYear,
+        end_year: filters.endYear,
+      });
+
+      try {
+        const summaryRes = await fetch(`http://127.0.0.1:8000/co2-summary?${summaryQuery.toString()}`);
+        if (summaryRes.ok) {
+          const summaryJson = await summaryRes.json();
+          if (summaryJson.summary) {
+            setSummary(summaryJson.summary);
+          } else {
+            generateSummary(dataJson, filters);
+          }
+        } else {
+          generateSummary(dataJson, filters);
+        }
+      } catch (summaryErr) {
+        console.error("Error fetching AI summary:", summaryErr);
+        generateSummary(dataJson, filters);
+      }
+    } catch (err) {
+      console.error("Error fetching data:", err);
+      setError(err.message || "Failed to fetch data.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleApplyFilters = (filters) => {
-    setActiveFilters(filters)
-    fetchData(filters)
-    fetchSummary(filters)
-  }
+    setActiveFilters(filters);
+    fetchData(filters);
+  };
 
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
       legend: {
-        display: true,
+        position: "top",
         labels: {
-          font: {
-            family: "'Inter', sans-serif",
-            size: 12,
-          },
+          font: { family: "'Inter', sans-serif", size: 12 },
           usePointStyle: true,
           padding: 20,
         },
       },
       tooltip: {
         backgroundColor: "rgba(17, 24, 39, 0.8)",
-        titleFont: {
-          family: "'Inter', sans-serif",
-          size: 14,
-        },
-        bodyFont: {
-          family: "'Inter', sans-serif",
-          size: 13,
-        },
+        titleFont: { family: "'Inter', sans-serif", size: 14 },
+        bodyFont: { family: "'Inter', sans-serif", size: 13 },
         padding: 12,
         cornerRadius: 6,
         callbacks: {
-          label: (tooltipItem) => {
-            return `${tooltipItem.dataset.label}: ${tooltipItem.raw.toLocaleString()} metric tons`
-          },
+          label: (ctx) => `${ctx.dataset.label}: ${ctx.raw.toLocaleString()} metric tons`,
         },
       },
     },
@@ -145,34 +255,18 @@ const CO2Combined = () => {
         title: {
           display: true,
           text: "CO₂ Emissions (Metric Tons)",
-          font: {
-            family: "'Inter', sans-serif",
-            size: 12,
-            weight: 500,
-          },
+          font: { family: "'Inter', sans-serif", size: 12, weight: 500 },
         },
-        grid: {
-          color: "rgba(156, 163, 175, 0.15)",
-        },
+        grid: { color: "rgba(156, 163, 175, 0.15)" },
         ticks: {
-          font: {
-            family: "'Inter', sans-serif",
-            size: 11,
-          },
-          callback: (value) => {
-            return value.toLocaleString()
-          },
+          font: { family: "'Inter', sans-serif", size: 11 },
+          callback: (value) => value.toLocaleString(),
         },
       },
       x: {
-        grid: {
-          display: false,
-        },
+        grid: { display: false },
         ticks: {
-          font: {
-            family: "'Inter', sans-serif",
-            size: 11,
-          },
+          font: { family: "'Inter', sans-serif", size: 11 },
         },
       },
     },
@@ -184,18 +278,17 @@ const CO2Combined = () => {
       mode: "index",
       intersect: false,
     },
-    elements: {
-      point: {
-        hoverBorderWidth: 2,
-      },
-    },
-  }
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 bg-gray-50 min-h-screen">
       <div className="mb-8">
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">CO₂ Emissions Dashboard</h1>
-        <p className="text-gray-600">Analyze historical carbon dioxide emissions data by country and time period</p>
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
+          CO₂ Emissions Dashboard
+        </h1>
+        <p className="text-gray-600">
+          Analyze historical carbon dioxide emissions data by country and time period
+        </p>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm p-4 sm:p-6 mb-8 border border-gray-100">
@@ -209,26 +302,26 @@ const CO2Combined = () => {
 
           {activeFilters && (
             <div className="mb-4 flex flex-wrap gap-2">
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                Country: {activeFilters.country}
+              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                Countries: {activeFilters.countries.join(", ")}
               </span>
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
                 Period: {activeFilters.startYear} - {activeFilters.endYear}
               </span>
             </div>
           )}
 
           <div className="relative h-[400px]">
-            {chartLoading && (
+            {loading && (
               <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-10">
                 <div className="flex flex-col items-center">
-                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mb-2"></div>
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-red-500 mb-2"></div>
                   <span className="text-sm text-gray-600">Loading chart data...</span>
                 </div>
               </div>
             )}
 
-            {error && (
+            {error && !chartData && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center p-6 bg-red-50 rounded-lg border border-red-100 max-w-md">
                   <svg
@@ -236,7 +329,6 @@ const CO2Combined = () => {
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
-                    xmlns="http://www.w3.org/2000/svg"
                   >
                     <path
                       strokeLinecap="round"
@@ -247,12 +339,14 @@ const CO2Combined = () => {
                   </svg>
                   <h3 className="text-lg font-medium text-red-800 mb-2">Error Loading Data</h3>
                   <p className="text-red-600">{error}</p>
-                  <p className="mt-3 text-sm text-red-600">Please try adjusting your filters or try again later.</p>
+                  <p className="mt-3 text-sm text-red-600">
+                    Please try adjusting your filters or try again later.
+                  </p>
                 </div>
               </div>
             )}
 
-            {!chartData && !chartLoading && !error && (
+            {!chartData && !loading && !error && (
               <div className="absolute inset-0 flex items-center justify-center bg-gray-50 rounded-lg border border-dashed border-gray-300">
                 <div className="text-center p-6">
                   <svg
@@ -260,7 +354,6 @@ const CO2Combined = () => {
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
-                    xmlns="http://www.w3.org/2000/svg"
                   >
                     <path
                       strokeLinecap="round"
@@ -270,14 +363,21 @@ const CO2Combined = () => {
                     ></path>
                   </svg>
                   <h3 className="text-lg font-medium text-gray-800 mb-1">No Data to Display</h3>
-                  <p className="text-gray-600">Use the filters above to select a country and time period</p>
+                  <p className="text-gray-600">
+                    Use the filters above to select countries and a time period
+                  </p>
                 </div>
               </div>
             )}
 
             {chartData && (
               <div className="h-full w-full transition-opacity duration-300 ease-in-out">
-                <Line key={JSON.stringify(chartData)} data={chartData} options={chartOptions} ref={chartRef} />
+                <Line
+                  key={JSON.stringify(chartData)}
+                  data={chartData}
+                  options={chartOptions}
+                  ref={chartRef}
+                />
               </div>
             )}
           </div>
@@ -303,7 +403,6 @@ const CO2Combined = () => {
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
               >
                 <path
                   strokeLinecap="round"
@@ -317,20 +416,19 @@ const CO2Combined = () => {
           )}
 
           {!loading && summary && (
-            <div className="mt-2 p-4 rounded-lg bg-blue-50 border border-blue-100 transition-all duration-300 ease-in-out">
-              <p className="text-gray-800 leading-relaxed">{summary}</p>
+            <div className="mt-2 p-4 rounded-lg bg-red-50 border border-red-100 transition-all duration-300 ease-in-out">
+              <p className="text-gray-800 leading-relaxed whitespace-pre-line">{summary}</p>
 
               {activeFilters && (
-                <div className="mt-4 pt-4 border-t border-blue-100">
+                <div className="mt-4 pt-4 border-t border-red-100">
                   <h3 className="text-sm font-medium text-gray-700 mb-2">Key Insights</h3>
                   <ul className="space-y-2">
                     <li className="flex items-start">
                       <svg
-                        className="h-5 w-5 text-blue-500 mr-2 mt-0.5"
+                        className="h-5 w-5 text-red-500 mr-2 mt-0.5"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
-                        xmlns="http://www.w3.org/2000/svg"
                       >
                         <path
                           strokeLinecap="round"
@@ -340,16 +438,17 @@ const CO2Combined = () => {
                         ></path>
                       </svg>
                       <span className="text-sm text-gray-700">
-                        Data shown for {activeFilters.country} from {activeFilters.startYear} to {activeFilters.endYear}
+                        Data shown for {activeFilters.countries.length}{" "}
+                        {activeFilters.countries.length === 1 ? "country" : "countries"} from{" "}
+                        {activeFilters.startYear} to {activeFilters.endYear}
                       </span>
                     </li>
                     <li className="flex items-start">
                       <svg
-                        className="h-5 w-5 text-blue-500 mr-2 mt-0.5"
+                        className="h-5 w-5 text-red-500 mr-2 mt-0.5"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
-                        xmlns="http://www.w3.org/2000/svg"
                       >
                         <path
                           strokeLinecap="round"
@@ -358,7 +457,9 @@ const CO2Combined = () => {
                           d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                         ></path>
                       </svg>
-                      <span className="text-sm text-gray-700">Emissions are measured in metric tons of CO₂</span>
+                      <span className="text-sm text-gray-700">
+                        Emissions are measured in metric tons of CO₂
+                      </span>
                     </li>
                   </ul>
                 </div>
@@ -369,11 +470,10 @@ const CO2Combined = () => {
           {!loading && activeFilters && (
             <div className="mt-6">
               <button
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-150 ease-in-out w-full justify-center"
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-150 ease-in-out w-full justify-center"
                 onClick={() => {
                   if (activeFilters) {
-                    fetchData(activeFilters)
-                    fetchSummary(activeFilters)
+                    fetchData(activeFilters);
                   }
                 }}
               >
@@ -382,7 +482,6 @@ const CO2Combined = () => {
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
-                  xmlns="http://www.w3.org/2000/svg"
                 >
                   <path
                     strokeLinecap="round"
@@ -398,8 +497,7 @@ const CO2Combined = () => {
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default CO2Combined
-
+export default CO2Chart;
