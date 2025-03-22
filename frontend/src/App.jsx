@@ -1,20 +1,17 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
-import CO2EmissionsChart from './Chart'
+import React from "react";
+import TemperatureChart from "./components/TemperatureChart";
+import CO2Chart from "./components/CO2Chart";
 
-function App() {
-  const [count, setCount] = useState(0)
-
+const App = () => {
   return (
-   <>
-   <div className=''>
+    <div className="p-6 bg-gray-100 min-h-screen">
+      <div className="grid grid-cols-2">
 
-   <CO2EmissionsChart/>
-   </div>
-   </>
-  )
-}
+      <TemperatureChart />
+      <CO2Chart />
+      </div>
+    </div>
+  );
+};
 
-export default App
+export default App;
