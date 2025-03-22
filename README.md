@@ -14,7 +14,11 @@ This project is a web application that visualizes CO2 and temperature data using
 - pip (Python package installer)
 
 ## Setup
-
+### Clone the project
+```sh
+git clone https://github.com/yashKathoke/IEM_hackathon_climate_change.git
+cd IEM_hackathon_climate_change
+```
 ### Backend
 
 1. Navigate to the backend directory:
